@@ -321,7 +321,13 @@ def on_order_snapshot(col_snapshot, changes, read_time):
                 if cancel_reason == 'pago_no_verificado':
                     send_push_notification(token, "Pago no verificado ❌", "El comercio no pudo validar tu transferencia. Tu orden ha sido cancelada.", {"orderId": doc_id, "role": "client"}, user_id)
                 else:
-                    send_push_notification(token, "Pedido Cancelado", "El comercio ha cancelado tu pedido.", {"orderId": doc_id, "role": "client"}, user_id)
+                    reason_msgs = {
+                        'agotado': "Se agotó un producto, por eso el comercio canceló tu pedido.",
+                        'cerrado': "El comercio cerró y no pudo tomar tu pedido.",
+                        'ocupado': "El comercio está muy ocupado y no pudo tomar tu pedido.",
+                    }
+                    body = reason_msgs.get(cancel_reason, "El comercio ha cancelado tu pedido.")
+                    send_push_notification(token, "Pedido Cancelado", body, {"orderId": doc_id, "role": "client"}, user_id)
 
             # 3. Listo para recoger
             elif status == 'ready':
