@@ -237,6 +237,13 @@ def on_order_snapshot(col_snapshot, changes, read_time):
         okey = f"notif:order:{doc_id}"
         if state.get(okey) == status:
             continue
+        # Gate PERSISTENTE (sobrevive reinicios y expiración del cache): el doc registra
+        # el último estado ya notificado. Sin esto, cualquier update posterior del doc
+        # (ej. la CALIFICACIÓN del cliente) re-dispara MODIFIED con status='delivered'
+        # y se reenvía "Pedido Entregado".
+        if data.get('lastNotifiedStatus') == status:
+            state.set(okey, status, ttl=_ORDER_TTL)
+            continue
         state.set(okey, status, ttl=_ORDER_TTL)
 
         # === Lógica de Notificaciones ===
@@ -284,6 +291,11 @@ def on_order_snapshot(col_snapshot, changes, read_time):
                             send_push_notification(store_token, "Reserva Cancelada", f"El cliente {user_name} ha cancelado la reserva.", {"orderId": doc_id, "role": "commerce"}, store_id)
                         else:
                             send_push_notification(store_token, "Reserva Cancelada", "Has cancelado/rechazado la reserva.", {"orderId": doc_id, "role": "commerce"}, store_id)
+                # Registrar el estado notificado en el doc (gate persistente)
+                try:
+                    db.collection('orders').document(doc_id).update({'lastNotifiedStatus': status})
+                except Exception:
+                    pass
                 continue # Evitar procesar el resto de la lógica de órdenes de comida
             
             # --- PEDIDOS DE COMIDA/FAVORES ---
@@ -376,6 +388,12 @@ def on_order_snapshot(col_snapshot, changes, read_time):
                     send_push_notification(token, "¡Favor Completado! 🎉", "El repartidor ha completado tu Punto Favor. ¡Gracias por usar la app!", {"orderId": doc_id, "role": "client"}, user_id)
                 else:
                     send_push_notification(token, "¡Pedido Entregado! 🎉", "Tu pedido ha sido entregado con éxito. ¡Que lo disfrutes!", {"orderId": doc_id, "role": "client"}, user_id)
+
+            # Registrar el estado notificado en el doc (gate persistente contra re-envíos)
+            try:
+                db.collection('orders').document(doc_id).update({'lastNotifiedStatus': status})
+            except Exception:
+                pass
 
 def on_user_snapshot(col_snapshot, changes, read_time):
     for change in changes:
