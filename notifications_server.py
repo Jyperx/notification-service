@@ -232,6 +232,7 @@ def on_order_snapshot(col_snapshot, changes, read_time):
         data = change.document.to_dict()
         status = data.get('status')
         is_favor = data.get('isFavor', False)
+        is_express = is_favor and data.get('favorMode') == 'express'
         
         # Evitar procesar si el estado no ha cambiado
         okey = f"notif:order:{doc_id}"
@@ -302,10 +303,10 @@ def on_order_snapshot(col_snapshot, changes, read_time):
             # 1. Nuevo Pedido Recibido
             if status == 'received':
                 if is_favor:
-                    # Notificar a repartidores sobre un Punto Favor
+                    # Notificar a repartidores sobre un Punto Favor / Express
                     notify_active_drivers(
-                        "¡Nuevo Punto Favor!", 
-                        "Alguien necesita un favor cerca. ¡Abre el radar!",
+                        "¡Nuevo Punto Express! 📦" if is_express else "¡Nuevo Punto Favor!",
+                        "Alguien necesita llevar un paquete. ¡Abre el radar!" if is_express else "Alguien necesita un favor cerca. ¡Abre el radar!",
                         {"orderId": doc_id, "role": "driver"},
                         data.get('userId')
                     )
@@ -359,7 +360,9 @@ def on_order_snapshot(col_snapshot, changes, read_time):
             elif status == 'accepted_by_driver':
                 user_id = data.get('userId')
                 token = get_user_push_token(user_id)
-                if is_favor:
+                if is_express:
+                    send_push_notification(token, "¡Repartidor asignado! \U0001f3c3", "Un repartidor va en camino a recoger tu paquete.", {"orderId": doc_id, "role": "client"}, user_id)
+                elif is_favor:
                     send_push_notification(token, "¡Repartidor asignado! \U0001f3c3", "Un repartidor se dirige a realizar tus compras.", {"orderId": doc_id, "role": "client"}, user_id)
                 else:
                     send_push_notification(token, "¡Repartidor asignado!", "Un repartidor va en camino a recoger tu pedido.", {"orderId": doc_id, "role": "client"}, user_id)
@@ -368,14 +371,18 @@ def on_order_snapshot(col_snapshot, changes, read_time):
             elif status == 'picked_up':
                 user_id = data.get('userId')
                 token = get_user_push_token(user_id)
-                if is_favor:
+                if is_express:
+                    send_push_notification(token, "¡Paquete recogido! \U0001f4e6", "El repartidor ya tiene tu paquete y va en camino a entregarlo.", {"orderId": doc_id, "role": "client"}, user_id)
+                elif is_favor:
                     send_push_notification(token, "¡Comprando! \U0001f6d2", "El repartidor está en el establecimiento comprando lo que pediste.", {"orderId": doc_id, "role": "client"}, user_id)
                 else:
                     send_push_notification(token, "¡Tu pedido va en camino! \U0001f6f5", "El repartidor ha recogido tu pedido y se dirige hacia ti.", {"orderId": doc_id, "role": "client"}, user_id)
 
-            # 5.5 Favor en camino (después de comprar)
+            # 5.5 Favor de compras en camino (después de comprar). En Express se silencia:
+            # su 'picked_up' ya avisó "paquete recogido y va en camino", así que no
+            # duplicamos aviso al pasar por on_the_way.
             elif status == 'on_the_way':
-                if is_favor:
+                if is_favor and not is_express:
                     user_id = data.get('userId')
                     token = get_user_push_token(user_id)
                     send_push_notification(token, "¡Compras terminadas! \U0001f6f5", "El repartidor ya tiene tus cosas y va en camino hacia ti.", {"orderId": doc_id, "role": "client"}, user_id)
@@ -384,7 +391,9 @@ def on_order_snapshot(col_snapshot, changes, read_time):
             elif status == 'delivered':
                 user_id = data.get('userId')
                 token = get_user_push_token(user_id)
-                if is_favor:
+                if is_express:
+                    send_push_notification(token, "¡Paquete Entregado! 🎉", "Tu paquete llegó a su destino. ¡Gracias por usar Punto Express!", {"orderId": doc_id, "role": "client"}, user_id)
+                elif is_favor:
                     send_push_notification(token, "¡Favor Completado! 🎉", "El repartidor ha completado tu Punto Favor. ¡Gracias por usar la app!", {"orderId": doc_id, "role": "client"}, user_id)
                 else:
                     send_push_notification(token, "¡Pedido Entregado! 🎉", "Tu pedido ha sido entregado con éxito. ¡Que lo disfrutes!", {"orderId": doc_id, "role": "client"}, user_id)
