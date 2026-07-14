@@ -188,10 +188,20 @@ def get_user_push_token(user_id):
 def notify_active_drivers(title, body, data=None, exclude_user_id=None):
     """Envía push a todos los repartidores que estén online."""
     try:
-        drivers = db.collection('users') \
-            .where(filter=FieldFilter('isDriver', '==', True)) \
-            .where(filter=FieldFilter('isOnline', '==', True)) \
-            .stream()
+        # Query principal (dos filtros). Si falla por índice/permiso, no queremos que
+        # se caiga TODO el envío: caemos a un query de un solo filtro y filtramos online
+        # en memoria. Así una notificación nunca se pierde por un índice faltante.
+        try:
+            drivers = list(db.collection('users')
+                .where(filter=FieldFilter('isDriver', '==', True))
+                .where(filter=FieldFilter('isOnline', '==', True))
+                .stream())
+        except Exception as q_err:
+            print(f"[notify] query compuesto falló ({q_err}); usando fallback isDriver + filtro en memoria")
+            drivers = [d for d in db.collection('users')
+                       .where(filter=FieldFilter('isDriver', '==', True)).stream()
+                       if (d.to_dict() or {}).get('isOnline') is True]
+
         tokens = []
         for d in drivers:
             # No enviar la notificación al mismo usuario que creó el pedido
